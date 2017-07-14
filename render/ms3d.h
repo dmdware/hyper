@@ -9,6 +9,11 @@ struct Vec3f
 	float x, y, z;
 };
 
+struct Vec2f
+{
+	float x, y;
+};
+
 typedef struct Vec3f Vec3f;
 
 struct Matrix

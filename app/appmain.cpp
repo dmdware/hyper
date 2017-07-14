@@ -162,15 +162,80 @@ Vec3f projvecontopl(Vec3f v, Vec3f pn, Vec3f pp)
 	return r;
 }
 
+
+void gettexc(Vec2f &retexc,
+	Vec3f ir,
+	Vec2f *texc,
+	Vec3f *tri)
+{
+	// compute vectors
+	//Vec2f v0 = tri[1] - tri[0], 
+	//	v1 = tri[2] - tri[0],
+	//	v2 = pout - tri[0];
+#if 0
+	Vec3f v0 = tri[1] - tri[0],
+		v1 = tri[2] - tri[0],
+		v2 = ir - tri[0];
+#else
+	Vec3f v0, v1, v2;
+	v0.x = tri[1].x - tri[0].x;
+	v0.y = tri[1].y - tri[0].y;
+	v0.z = tri[1].z - tri[0].z;
+	v1.x = tri[2].x - tri[0].x;
+	v1.y = tri[2].y - tri[0].y;
+	v1.z = tri[2].z - tri[0].z;
+	v2.x = ir.x - tri[0].x;
+	v2.y = ir.y - tri[0].y;
+	v2.z = ir.z - tri[0].z;
+#endif
+
+	// do bounds test for each position
+	double f00 = dot(v0, v0);
+	double f01 = dot(v0, v1);
+	double f11 = dot(v1, v1);
+
+	double f02 = dot(v0, v2);
+	double f12 = dot(v1, v2);
+
+	// Compute barycentric coordinates
+	double invDenom = 1 / (f00 * f11 - f01 * f01);
+	//if (ISNAN(invDenom))
+	if(invDenom != invDenom)
+		invDenom = 1;
+	double fU = (f11 * f02 - f01 * f12) * invDenom;
+	double fV = (f00 * f12 - f01 * f02) * invDenom;
+
+	// Check if point is in triangle
+	//if( ( fU >= 0.0 ) && ( fV >= 0.0 ) && ( fU + fV <= 1.0 ) )
+	//	goto dotex;
+	//continue;
+
+dotex:
+
+#if 0
+	retexc = texc[0] * (1 - fU - fV) +
+		texc[1] * (fU)+
+		texc[2] * (fV);
+#else
+	retexc.x = texc[0].x * (1 - fU - fV) +
+		texc[1].x * fU +
+		texc[2].x * fV;
+	retexc.y = texc[0].y * (1 - fU - fV) +
+		texc[1].y * fU +
+		texc[2].y * fV;
+#endif
+}
+
 void main()
 {
 	MS3DModel m;
 	unsigned int test;
 	char c[3];
-	m.load("asd.ms3d", test, test, test, test, true);
+	m.load("e.ms3d", test, test, test, test, true);
+	texdata* td = loadpng("e.png");
 
 #define WX	256
-#define WY	512
+#define WY	256
 
 	unsigned char rgb[WX*WY * 3];
 	float depth[WX*WY];
@@ -183,6 +248,7 @@ void main()
 		depth[i] = 1;
 	}
 
+#if 01
 #define NEAR		1
 #define FAR			110
 #define ASPECT		((float)WX/(float)WY)
@@ -203,6 +269,28 @@ void main()
 #define OFFX		5
 #define OFFY		0
 #define OFFZ		0
+#else
+#define NEAR		1
+#define FAR			110
+#define ASPECT		((float)WX/(float)WY)
+#define FOV			45
+#define POSX		-100
+#define POSY		100
+#define POSZ		-100
+#define VIEWX		0
+#define VIEWY		0
+#define VIEWZ		0
+#define UPX			0
+#define UPY			1
+#define UPZ			0
+#define RIGHTX		-150
+#define RIGHTY		0
+#define RIGHTZ		100
+#define DISTSCALE	1
+#define OFFX		5
+#define OFFY		0
+#define OFFZ		0
+#endif
 
 	Vec3f up;
 	Vec3f right;
@@ -224,6 +312,24 @@ void main()
 	right.z = RIGHTZ;
 	right = norm(right);
 	up = norm(cross(right, viewdir));
+
+#if 0
+	for (int i = 0; i < m.m_numTriangles; ++i)
+	{
+		MS3DModel::Triangle* t = &m.m_pTriangles[i];
+
+		for (int j = 0; j < 3; ++j)
+		{
+			float *v = m.m_pVertices[t->m_vertexIndices[j]].m_location;
+		//	initexc[j].x = m.m_pTriangles[i].m_s[j];
+			float latlined = mag(*(Vec3f*)v);
+			float lon = (atan2(v[0], v[2]) + M_PI) / (2.0f * M_PI);
+			float lat = (acos(v[1] / latlined) * ((v[1]<0)?(-1):1) + M_PI) / (2.0f * M_PI);
+			m.m_pTriangles[i].m_s[j] = lon;
+			m.m_pTriangles[i].m_t[j] = lat;
+		}
+	}
+#endif
 
 	for (int i = 0; i < m.m_numVertices; ++i)
 	{
@@ -266,12 +372,15 @@ void main()
 		sideouter = (pow(0.0f + sideouter, 2.0f) - 0.0f) * ASPECT / 4000000.0f;
 		vertouter = (pow(0.0f + vertouter, 2.0f) - 0.0f) / 4000000.0f;
 #elif 0
-		float sideouter = ((depthf) * ASPECT / 5.0f + pow(depthf / 0.01f, 5.0f) * ASPECT) / 200000000000000000000.0f;
+		float sideouter = ((depthf) * ASPECT / 5.0f + pow(depthf / 0.01f, 4.0f) * ASPECT) / 10000000000000000.0f;
+		float vertouter = ((depthf) / 5.0f + pow(depthf / 0.01f, 4.0f)) / 10000000000000000.0f;
+#elif 0
+		float sideouter = ((depthf)* ASPECT / 5.0f + pow(depthf / 0.01f, 5.0f) * ASPECT) / 200000000000000000000.0f;
 		float vertouter = ((depthf) / 5.0f + pow(depthf / 0.01f, 5.0f)) / 200000000000000000000.0f;
-#elif 01
+#elif 0
 		float sideouter = ((depthf)* ASPECT / 5.0f + pow(depthf / 0.01f, 6.0f) * ASPECT) / 5000000000000000000000000.0f;
 		float vertouter = ((depthf) / 5.0f + pow(depthf / 0.01f, 6.0f)) / 5000000000000000000000000.0f;
-#elif 0
+#elif 01
 		float sideouter = (depthf)* ASPECT / 5.0f;
 		float vertouter = (depthf) / 5.0f;
 #endif
@@ -324,6 +433,8 @@ void main()
 		MS3DModel::Triangle* t = &m.m_pTriangles[i];
 		float vmin[3];
 		float vmax[3];
+		Vec2f initexc[3];
+		Vec3f trivs[3];
 
 		for (int j = 0; j < 3; ++j)
 		{
@@ -341,6 +452,11 @@ void main()
 				vmax[1] = v[1];
 			if (v[2] > vmax[2] || j == 0)
 				vmax[2] = v[2];
+
+			initexc[j].x = m.m_pTriangles[i].m_s[j];
+			//initexc[j].y = 1.0f - m.m_pTriangles[i].m_t[j];
+			initexc[j].y =  m.m_pTriangles[i].m_t[j];
+			trivs[j] = *(Vec3f*)v;
 		}
 
 		float tplaned;
@@ -357,9 +473,9 @@ void main()
 
 		makeplane(&tplaned, m.m_pVertices[t->m_vertexIndices[0]].m_location, (float*)&tplanen);
 
-		for (float sx = vmin[0]; sx <= vmax[0]; sx += 1.0f / WX)
+		for (float sx = vmin[0] - 1.0f/WX; sx <= vmax[0] + 1.0f/WX; sx += 1.0f / WX / 2.0f)
 		{
-			for (float sy = vmin[1]; sy <= vmax[1]; sy += 1.0f / WY)
+			for (float sy = vmin[1] - 1.0f/WY; sy <= vmax[1] + 1.0f/WY; sy += 1.0f / WY / 2.0f)
 			{
 				Vec3f sp;
 				sp.x = sx;
@@ -402,6 +518,30 @@ void main()
 				//rgb[pixi * 3 + 0] = 0;
 				//rgb[pixi * 3 + 1] = 0;
 				//rgb[pixi * 3 + 2] = 0;
+
+				Vec2f outtexc;
+				Vec3f ir = sp;
+
+				gettexc(outtexc, ir, initexc, trivs);
+
+				while (outtexc.y < 0)
+					outtexc.y += 1;
+				while (outtexc.x < 0)
+					outtexc.x += 1;
+				while (outtexc.y >= 1)
+					outtexc.y -= 1;
+				while (outtexc.x >= 1)
+					outtexc.x -= 1;
+
+				outtexc.y = 1.0f - outtexc.y;
+				outtexc.x = 1.0f - outtexc.x;
+
+				int inpx = (int)(td->sizex*outtexc.x) + (int)(td->sizey*outtexc.y)*td->sizex;
+				unsigned char *inrgb = &td->data[ inpx * td->channels ];
+
+				rgb[pixi * 3 + 0] = inrgb[0] * sp.z;
+				rgb[pixi * 3 + 1] = inrgb[1] * sp.z;
+				rgb[pixi * 3 + 2] = inrgb[2] * sp.z;
 			}
 		}
 	}
@@ -411,6 +551,9 @@ void main()
 	//rgb[3 * (WX / 2 + WX * WY / 2) + 2] = 0;
 
 	savepng("out.png", (unsigned char*)rgb, WX, WY, 3);
+
+	ltexfree(td);
+	free(td);
 
 	printf("done\r\n");
 	fgets(c, 2, stdin);

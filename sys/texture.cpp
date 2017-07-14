@@ -12,6 +12,17 @@
 
 #include "texture.h"
 
+void ltexinit(texdata *lt)
+{
+	lt->data = NULL;
+}
+
+void ltexfree(texdata *lt)
+{
+	free(lt->data);
+	lt->data = NULL;
+}
+
 static FILE* savepngfp = NULL;
 
 void png_file_write(png_structp png_ptr, png_bytep data, png_size_t length) 
@@ -171,3 +182,197 @@ int savepng(const char* full, unsigned char* data, int sizex, int sizey, int cha
 	return 1;
 }
 
+static FILE* loadpngfp = NULL;
+
+void png_file_read(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+	fread(data, 1, length, loadpngfp);
+}
+
+texdata *loadpng(const char *file)
+{
+	texdata *ltex = NULL;
+	//header for testing if it is a png
+	png_byte header[8];
+	int is_png;
+	png_structp png_ptr;
+	png_infop info_ptr;
+	png_infop end_info;
+	int i;
+
+	//variables to pass to get info
+	int bit_depth, color_type;
+	png_uint_32 twidth, theight;
+	png_bytep trans_alpha = NULL;
+	int num_trans = 0;
+	png_color_16p trans_color = NULL;
+	int row_bytes;
+	png_bytep *row_pointers;
+
+	loadpngfp = fopen(file, "rb");
+
+	if (!loadpngfp)
+	{
+		return NULL;
+	}
+
+	fread(header, 8, 1, loadpngfp);
+	//g_src.read((void*)header, 8);
+
+	//test if png
+	is_png = !png_sig_cmp(header, 0, 8);
+	if (!is_png)
+	{
+	//	fprintf(g_applog,
+	//		"Not a png file : %s %d,%d,%d,%d,%d,%d,%d,%d \r\n", file,
+	//		(int)header[0], (int)header[1], (int)header[2], (int)header[3],
+	//		(int)header[4], (int)header[5], (int)header[6], (int)header[7]);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	//create png struct
+	png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png_ptr)
+	{
+		//fprintf(g_applog, "Unable to create png struct : %s \r\n", file);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	//create png info struct
+	info_ptr = png_create_info_struct(png_ptr);
+	if (!info_ptr)
+	{
+		png_destroy_read_struct(&png_ptr, (png_infopp)NULL, (png_infopp)NULL);
+		//fprintf(g_applog, "Unable to create png info : %s \r\n", file);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	//create png info struct
+	end_info = png_create_info_struct(png_ptr);
+	if (!end_info)
+	{
+		png_destroy_read_struct(&png_ptr, &info_ptr, (png_infopp)NULL);
+	//	fprintf(g_applog, "Unable to create png end info : %s \r\n", file);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	//png error stuff, not sure libpng man suggests this.
+	if (setjmp(png_jmpbuf(png_ptr)))
+	{
+	//	fprintf(g_applog, "Error during setjmp : %s \r\n", file);
+		png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	png_set_read_fn(png_ptr, NULL, png_file_read);
+
+	//let libpng know you already read the first 8 bytes
+	png_set_sig_bytes(png_ptr, 8);
+
+	// read all the info up to the image data
+	png_read_info(png_ptr, info_ptr);
+
+	// get info about png
+	png_get_IHDR(png_ptr, info_ptr, &twidth, &theight, &bit_depth, &color_type, NULL, NULL, NULL);
+
+	//	dbool alphaFlag;
+
+	ltex = (texdata*)malloc(sizeof(texdata));
+	ltexinit(ltex);
+
+	ltex->sizex = twidth;
+	ltex->sizey = theight;
+
+	switch (color_type)
+	{
+	case PNG_COLOR_TYPE_RGBA:
+		ltex->channels = 4;
+		break;
+	case PNG_COLOR_TYPE_RGB:
+		ltex->channels = 3;
+		break;
+	case PNG_COLOR_TYPE_PALETTE:
+	{
+		png_set_palette_to_rgb(png_ptr);
+		ltex->channels = 3;
+#if 0
+		png_get_tRNS(png_ptr, info_ptr, &trans_alpha, &num_trans, &trans_color);
+		if (trans_alpha != NULL)
+			alphaFlag = ectrue;
+		else
+			alphaFlag = ecfalse;
+		if (alphaFlag)
+			ltex->channels = 4;
+#endif
+
+		//if(alphaFlag)
+		if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))
+		{
+			ltex->channels = 4;
+			png_set_tRNS_to_alpha(png_ptr);
+		}
+	}
+	break;
+	default:
+	//	fprintf(g_applog,
+//			"%s color type %d not supported \r\n", file, (int)png_get_color_type(png_ptr, info_ptr));
+
+		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+		ltexfree(ltex);
+		free(ltex);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	// Update the png info struct.
+	png_read_update_info(png_ptr, info_ptr);
+
+	// Row size in bytes.
+	row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+
+	ltex->data = (unsigned char*)malloc(row_bytes * ltex->sizey);
+
+	// Allocate the image_data as a big block, to be given to opengl
+	if (!ltex->data)
+	{
+		//clean up memory and close stuff
+		png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
+//		fprintf(g_applog, "Unable to allocate image_data while loading %s \r\n", file);
+		ltexfree(ltex);
+		free(ltex);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	//row_pointers is for pointing to image_data for reading the png with libpng
+	row_pointers = (png_bytep*)malloc(sizeof(png_bytep)*ltex->sizey);
+	if (!row_pointers)
+	{
+		//clean up memory and close stuff
+		png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
+		ltexfree(ltex);
+		free(ltex->data);
+	//	fprintf(g_applog, "Unable to allocate row_pointer while loading %s \r\n", file);
+		fclose(loadpngfp);
+		return NULL;
+	}
+
+	// set the individual row_pointers to point at the correct offsets of image_data
+	for (i = 0; i < ltex->sizey; ++i)
+		row_pointers[i] = ltex->data + i * row_bytes;
+
+	//read the png into image_data through row_pointers
+	png_read_image(png_ptr, row_pointers);
+
+	//clean up memory and close stuff
+	png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
+	free(row_pointers);
+	fclose(loadpngfp);
+
+	return ltex;
+}
